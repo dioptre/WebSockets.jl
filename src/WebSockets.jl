@@ -22,6 +22,8 @@ using HttpServer
 using Codecs
 using Nettle
 using Compat
+using MbedTLS
+using Debug
 
 export WebSocket,
        WebSocketHandler,
@@ -40,7 +42,7 @@ end
 
 # A WebSocket is a wrapper over a TcpSocket. It takes care of wrapping outgoing
 # data in a frame and unwrapping (and concatenating) incoming data.
-type WebSocket
+@debug type WebSocket
   id::Int
   socket::TCPSock
   is_closed::Bool
@@ -49,6 +51,16 @@ type WebSocket
   function WebSocket(id::Int,socket::TCPSock)
     init_socket(socket)
     new(id,socket, !isopen(socket), false)
+  end
+  function WebSocket(client::HttpServer.Client)
+    if typeof(client) === HttpServer.Client{MbedTLS.SSLContext}
+	@bp
+	init_socket(client.sock.bio)
+	return new(client.id,client.sock.bio, !isopen(client.sock.bio), false)
+    else
+	init_socket(client.sock)
+	return new(client.id,client.sock, !isopen(client.sock), false)
+    end	
   end
 end
 
@@ -337,7 +349,7 @@ end
 #   3. Encode the resulting number in base64.
 # This function then returns the string of the base64-encoded value.
 function generate_websocket_key(key)
-    hashed_key = digest("SHA1", key*"258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+    hashed_key = Nettle.digest("SHA1", key*"258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
     bytestring(encode(Base64, hashed_key))
 end
 
@@ -378,7 +390,7 @@ end
 import HttpServer: handle, is_websocket_handshake
 function handle(handler::WebSocketHandler, req::Request, client::HttpServer.Client)
     websocket_handshake(req, client)
-    sock = WebSocket(client.id, client.sock)
+    sock = WebSocket(client)
     handler.handle(req, sock)
     isopen(sock) && close(sock)
 end
